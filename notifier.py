@@ -10,6 +10,68 @@ from scraper import FloorPlan
 log = logging.getLogger(__name__)
 
 
+def send_confirmation_email(watch_plans: str, url: str) -> bool:
+    smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
+    smtp_port = int(os.getenv('SMTP_PORT', '587'))
+    smtp_user = os.getenv('SMTP_USER', '')
+    smtp_password = os.getenv('SMTP_PASSWORD', '')
+    notify_email = os.getenv('NOTIFY_EMAIL', '')
+
+    if not all([smtp_user, smtp_password, notify_email]):
+        log.error("Email config is incomplete — confirmation email not sent.")
+        return False
+
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    subject = "Floor Plan Monitor is running"
+
+    html = f"""<!DOCTYPE html>
+<html>
+<body style="font-family:Arial,sans-serif;max-width:620px;margin:0 auto;padding:24px;color:#333;">
+  <h2 style="color:#1565C0;">Monitor is active</h2>
+  <p>Your floor plan monitor started successfully and is checking every 5 minutes.</p>
+  <table style="border-collapse:collapse;width:100%;margin:16px 0;">
+    <tr><td style="padding:8px;color:#888;width:140px;">Watching</td>
+        <td style="padding:8px;font-weight:bold;">{watch_plans}</td></tr>
+    <tr style="background:#f9f9f9;">
+        <td style="padding:8px;color:#888;">URL</td>
+        <td style="padding:8px;"><a href="{url}" style="color:#1565C0;">{url}</a></td></tr>
+    <tr><td style="padding:8px;color:#888;">Started at</td>
+        <td style="padding:8px;">{timestamp}</td></tr>
+  </table>
+  <p style="color:#555;">You'll get another email as soon as any of these plans become available. No news means nothing is open yet.</p>
+</body>
+</html>"""
+
+    text = (
+        f"Floor Plan Monitor is running\n\n"
+        f"Watching: {watch_plans}\n"
+        f"URL: {url}\n"
+        f"Started at: {timestamp}\n\n"
+        f"You'll get an email as soon as one of these plans becomes available."
+    )
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From'] = smtp_user
+    msg['To'] = notify_email
+    msg.attach(MIMEText(text, 'plain'))
+    msg.attach(MIMEText(html, 'html'))
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_user, [notify_email], msg.as_string())
+        log.info("Confirmation email sent to %s", notify_email)
+        return True
+    except smtplib.SMTPAuthenticationError:
+        log.error("SMTP authentication failed — check SMTP_USER and SMTP_PASSWORD.")
+    except Exception as e:
+        log.error("Failed to send confirmation email: %s", e, exc_info=True)
+    return False
+
+
 def send_email_notification(plans: list[FloorPlan], url: str) -> bool:
     smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
     smtp_port = int(os.getenv('SMTP_PORT', '587'))

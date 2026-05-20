@@ -77,8 +77,8 @@ def _matches_watch_list(plan) -> bool:
     return any(p.search(text) for p in _WATCH_PATTERNS)
 
 
-def check_availability() -> None:
-    from notifier import send_email_notification
+def check_availability(first_run: bool = False) -> None:
+    from notifier import send_confirmation_email, send_email_notification
     from scraper import scrape_floor_plans
     from state import find_new_availabilities, load_state, save_state
 
@@ -105,6 +105,10 @@ def check_availability() -> None:
         )
 
     previous = load_state()
+
+    if first_run and not previous:
+        send_confirmation_email(_WATCH_PLANS_RAW or 'All plans', URL)
+
     newly_available = find_new_availabilities(previous, watched)
 
     if newly_available:
@@ -150,7 +154,7 @@ def main() -> None:
     log.info("URL: %s", URL)
     log.info("Press Ctrl+C to stop.\n")
 
-    check_availability()
+    check_availability(first_run=True)
     schedule.every(CHECK_INTERVAL).minutes.do(check_availability)
 
     try:
