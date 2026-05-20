@@ -10,6 +10,16 @@ from scraper import FloorPlan
 log = logging.getLogger(__name__)
 
 
+def _smtp_connect(host: str, port: int):
+    """Return an authenticated-ready SMTP connection. Port 465 uses SSL; others use STARTTLS."""
+    if port == 465:
+        return smtplib.SMTP_SSL(host, port, timeout=10)
+    server = smtplib.SMTP(host, port, timeout=10)
+    server.ehlo()
+    server.starttls()
+    return server
+
+
 def send_confirmation_email(watch_plans: str, url: str) -> bool:
     smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
     smtp_port = int(os.getenv('SMTP_PORT', '587'))
@@ -59,9 +69,7 @@ def send_confirmation_email(watch_plans: str, url: str) -> bool:
 
     log.info("Connecting to SMTP %s:%s...", smtp_host, smtp_port)
     try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-            server.ehlo()
-            server.starttls()
+        with _smtp_connect(smtp_host, smtp_port) as server:
             server.login(smtp_user, smtp_password)
             server.sendmail(smtp_user, [notify_email], msg.as_string())
         log.info("Confirmation email sent to %s", notify_email)
@@ -101,9 +109,7 @@ def send_email_notification(plans: list[FloorPlan], url: str) -> bool:
 
     log.info("Connecting to SMTP %s:%s...", smtp_host, smtp_port)
     try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-            server.ehlo()
-            server.starttls()
+        with _smtp_connect(smtp_host, smtp_port) as server:
             server.login(smtp_user, smtp_password)
             server.sendmail(smtp_user, [notify_email], msg.as_string())
         log.info("Email notification sent to %s", notify_email)
