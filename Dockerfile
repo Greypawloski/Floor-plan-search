@@ -1,12 +1,20 @@
-FROM mcr.microsoft.com/playwright/python:v1.60.0-jammy
+FROM python:3.11-slim-bullseye
+
+# Chromium system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+    libcups2 libdrm2 libdbus-1-3 libatspi2.0-0 \
+    libx11-6 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+    libxrandr2 libgbm1 libxcb1 libxkbcommon0 \
+    libpango-1.0-0 libcairo2 libasound2 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install app dependencies
-# (playwright itself is already in the base image at the correct version)
 COPY requirements.txt .
-RUN pip install --no-cache-dir schedule python-dotenv && \
-    pip install --no-cache-dir playwright-stealth || true
+RUN pip install --no-cache-dir -r requirements.txt
+# Download the Chromium browser that matches the installed playwright version
+RUN playwright install chromium
 
 COPY . .
 
