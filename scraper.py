@@ -239,14 +239,24 @@ def _extract_full_page_fallback(page) -> list[FloorPlan]:
 # ---------------------------------------------------------------------------
 
 _PLAN_NAME_RE = re.compile(
-    r'(studio|[a-z]\d?[\s/-]*plan|plan\s*[a-z\d]+|\d[\s-]*bed(?:room)?(?:s)?(?:\s*/\s*\d[\s-]*bath)?)',
+    r'('
+    r'penthouse\s*\d*'           # Penthouse 1, Penthouse 2, Penthouse
+    r'|ph[-\s]?\d+'              # PH1, PH-1, PH 1
+    r'|[a-z]\d{1,3}'            # B10, A1, C12 — letter + number plan codes
+    r'|studio'
+    r'|[a-z]\d?[\s/-]*plan'
+    r'|plan\s*[a-z\d]+'
+    r'|\d[\s-]*bed(?:room)?s?(?:\s*/\s*\d[\s-]*bath)?'
+    r')',
     re.IGNORECASE,
 )
 
 
 def _guess_plan_name(text: str) -> str:
-    m = _PLAN_NAME_RE.search(text)
-    if m:
-        return m.group().strip()
+    # Prefer the first recognizable plan identifier in the text
+    for m in _PLAN_NAME_RE.finditer(text):
+        candidate = m.group().strip()
+        if len(candidate) >= 2:
+            return candidate
     first_line = text.splitlines()[0].strip()
     return first_line[:60] if first_line else 'Unknown Plan'

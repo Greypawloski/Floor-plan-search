@@ -12,6 +12,7 @@ Usage:
 import argparse
 import logging
 import os
+import re
 import sys
 import time
 
@@ -33,9 +34,50 @@ log = logging.getLogger(__name__)
 URL = os.getenv('FLOOR_PLAN_URL', 'https://7600broadway.com/floorplans/')
 CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL_MINUTES', '5'))
 
+# Comma-separated plan names from .env, e.g. "B10,Penthouse 1,Penthouse 2"
+_WATCH_PLANS_RAW = os.getenv('WATCH_PLANS', '')
+
+
+def _build_watch_patterns() -> list[re.Pattern]:
+    """
+    Turn each entry in WATCH_PLANS into a regex that matches it as a substring,
+    case-insensitively. Spaces and hyphens are treated as interchangeable.
+    Examples:
+      "B10"         -> matches "Plan B10", "B-10", "b10"
+      "Penthouse 1" -> matches "Penthouse 1", "Penthouse-1", "penthouse1"
+      "PH1"         -> matches "PH1", "PH-1", "ph 1"
+    """
+    patterns = []
+    for raw in _WATCH_PLANS_RAW.split(','):
+        name = raw.strip()
+        if not name:
+            continue
+        # Build a flexible pattern:
+        #   1. Existing spaces/hyphens → optional [\s-]?
+        #   2. Letter→digit or digit→letter boundaries → optional [\s-]?
+        #      so "B10" matches "B10", "B-10", "B 10"
+        escaped = re.escape(name)
+        # Collapse escaped spaces/hyphens into optional separator
+        flexible = re.sub(r'(\\ |\\-)+', r'[\\s\\-]?', escaped)
+        # Insert optional separator at letter↔digit transitions
+        flexible = re.sub(r'(?<=[a-zA-Z])(?=\\d|[0-9])', r'[\\s\\-]?', flexible)
+        flexible = re.sub(r'(?<=\\d)(?=[a-zA-Z])|(?<=[0-9])(?=[a-zA-Z])', r'[\\s\\-]?', flexible)
+        patterns.append(re.compile(flexible, re.IGNORECASE))
+    return patterns
+
+
+_WATCH_PATTERNS = _build_watch_patterns()
+
+
+def _matches_watch_list(plan) -> bool:
+    """Return True if this plan should be watched (matches any configured name)."""
+    if not _WATCH_PATTERNS:
+        return True   # no filter configured → watch everything
+    text = plan.name + '\n' + plan.details
+    return any(p.search(text) for p in _WATCH_PATTERNS)
+
 
 def check_availability() -> None:
-    # Imports are here so .env is already loaded before they run
     from notifier import send_email_notification
     from scraper import scrape_floor_plans
     from state import find_new_availabilities, load_state, save_state
@@ -51,8 +93,19 @@ def check_availability() -> None:
         log.warning("Scraper returned no data — skipping this check")
         return
 
+    # Narrow to only the floor plans we care about
+    watched = [p for p in current if _matches_watch_list(p)]
+
+    if _WATCH_PATTERNS and len(watched) < len(current):
+        log.info(
+            "Watch list active: %d/%d scraped plan(s) match [%s]",
+            len(watched),
+            len(current),
+            _WATCH_PLANS_RAW,
+        )
+
     previous = load_state()
-    newly_available = find_new_availabilities(previous, current)
+    newly_available = find_new_availabilities(previous, watched)
 
     if newly_available:
         log.info("NEW availability detected: %d plan(s)", len(newly_available))
@@ -60,14 +113,14 @@ def check_availability() -> None:
             log.info("  • %s  [%s]", p.name, p.availability_text)
         send_email_notification(newly_available, URL)
     else:
-        available_count = sum(1 for p in current if p.available)
+        available_count = sum(1 for p in watched if p.available)
         log.info(
-            "No new availability. %d/%d plan(s) currently available.",
+            "No new availability. %d/%d watched plan(s) currently available.",
             available_count,
-            len(current),
+            len(watched),
         )
 
-    save_state(current)
+    save_state(watched)
 
 
 def main() -> None:
@@ -81,15 +134,22 @@ def main() -> None:
             os.remove('state.json')
             log.info("State cleared.")
 
+    if _WATCH_PATTERNS:
+        log.info(
+            "Watching only: %s",
+            ', '.join(r.strip() for r in _WATCH_PLANS_RAW.split(',') if r.strip()),
+        )
+    else:
+        log.info("No watch list set — monitoring ALL floor plans")
+
     if args.once:
         check_availability()
         return
 
-    log.info("Floor plan monitor started — checking every %d minute(s)", CHECK_INTERVAL)
+    log.info("Monitor started — checking every %d minute(s)", CHECK_INTERVAL)
     log.info("URL: %s", URL)
     log.info("Press Ctrl+C to stop.\n")
 
-    # Run immediately, then on schedule
     check_availability()
     schedule.every(CHECK_INTERVAL).minutes.do(check_availability)
 
