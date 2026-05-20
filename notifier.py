@@ -1,36 +1,57 @@
+import json
 import logging
 import os
-import smtplib
+import urllib.error
+import urllib.request
 from datetime import datetime
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 
 from scraper import FloorPlan
 
 log = logging.getLogger(__name__)
 
 
-def _smtp_connect(host: str, port: int):
-    """Return an authenticated-ready SMTP connection. Port 465 uses SSL; others use STARTTLS."""
-    if port == 465:
-        return smtplib.SMTP_SSL(host, port, timeout=10)
-    server = smtplib.SMTP(host, port, timeout=10)
-    server.ehlo()
-    server.starttls()
-    return server
+def _send(subject: str, html: str, text: str) -> bool:
+    """Send an email via Resend API (HTTPS — works on Railway)."""
+    api_key = os.getenv('RESEND_API_KEY', '')
+    notify_email = os.getenv('NOTIFY_EMAIL', '')
+
+    if not all([api_key, notify_email]):
+        log.error("RESEND_API_KEY and NOTIFY_EMAIL must be set in Railway Variables.")
+        return False
+
+    payload = json.dumps({
+        'from': 'Floor Plan Monitor <onboarding@resend.dev>',
+        'to': [notify_email],
+        'subject': subject,
+        'html': html,
+        'text': text,
+    }).encode()
+
+    req = urllib.request.Request(
+        'https://api.resend.com/emails',
+        data=payload,
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+        },
+        method='POST',
+    )
+
+    log.info("Sending email to %s via Resend...", notify_email)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+            log.info("Email sent — Resend id=%s", result.get('id'))
+            return True
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        log.error("Resend API error %s: %s", e.code, body)
+    except Exception as e:
+        log.error("Failed to send email: %s", e, exc_info=True)
+    return False
 
 
 def send_confirmation_email(watch_plans: str, url: str) -> bool:
-    smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
-    smtp_port = int(os.getenv('SMTP_PORT', '587'))
-    smtp_user = os.getenv('SMTP_USER', '')
-    smtp_password = os.getenv('SMTP_PASSWORD', '')
-    notify_email = os.getenv('NOTIFY_EMAIL', '')
-
-    if not all([smtp_user, smtp_password, notify_email]):
-        log.error("Email config is incomplete — confirmation email not sent.")
-        return False
-
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     subject = "Floor Plan Monitor is running"
 
@@ -48,7 +69,7 @@ def send_confirmation_email(watch_plans: str, url: str) -> bool:
     <tr><td style="padding:8px;color:#888;">Started at</td>
         <td style="padding:8px;">{timestamp}</td></tr>
   </table>
-  <p style="color:#555;">You'll get another email as soon as any of these plans become available. No news means nothing is open yet.</p>
+  <p style="color:#555;">You'll get another email the moment one of these plans becomes available.</p>
 </body>
 </html>"""
 
@@ -60,68 +81,16 @@ def send_confirmation_email(watch_plans: str, url: str) -> bool:
         f"You'll get an email as soon as one of these plans becomes available."
     )
 
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From'] = smtp_user
-    msg['To'] = notify_email
-    msg.attach(MIMEText(text, 'plain'))
-    msg.attach(MIMEText(html, 'html'))
-
-    log.info("Connecting to SMTP %s:%s...", smtp_host, smtp_port)
-    try:
-        with _smtp_connect(smtp_host, smtp_port) as server:
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, [notify_email], msg.as_string())
-        log.info("Confirmation email sent to %s", notify_email)
-        return True
-    except smtplib.SMTPAuthenticationError:
-        log.error("SMTP authentication failed — check SMTP_USER and SMTP_PASSWORD.")
-    except Exception as e:
-        log.error("Failed to send confirmation email: %s", e, exc_info=True)
-    return False
+    return _send(subject, html, text)
 
 
 def send_email_notification(plans: list[FloorPlan], url: str) -> bool:
-    smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
-    smtp_port = int(os.getenv('SMTP_PORT', '587'))
-    smtp_user = os.getenv('SMTP_USER', '')
-    smtp_password = os.getenv('SMTP_PASSWORD', '')
-    notify_email = os.getenv('NOTIFY_EMAIL', '')
-
-    if not all([smtp_user, smtp_password, notify_email]):
-        log.error(
-            "Email config is incomplete. Set SMTP_USER, SMTP_PASSWORD, and NOTIFY_EMAIL in your .env file."
-        )
-        return False
-
     count = len(plans)
     subject = (
-        f"🏠 Floor Plan Available at 7600 Broadway! "
+        f"Floor Plan Available at 7600 Broadway! "
         f"({count} plan{'s' if count > 1 else ''} found)"
     )
-
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    msg['From'] = smtp_user
-    msg['To'] = notify_email
-    msg.attach(MIMEText(_build_text(plans, url), 'plain'))
-    msg.attach(MIMEText(_build_html(plans, url), 'html'))
-
-    log.info("Connecting to SMTP %s:%s...", smtp_host, smtp_port)
-    try:
-        with _smtp_connect(smtp_host, smtp_port) as server:
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, [notify_email], msg.as_string())
-        log.info("Email notification sent to %s", notify_email)
-        return True
-    except smtplib.SMTPAuthenticationError:
-        log.error(
-            "SMTP authentication failed. For Gmail, use an App Password "
-            "(myaccount.google.com/apppasswords) and enable 2FA first."
-        )
-    except Exception as e:
-        log.error("Failed to send email: %s", e, exc_info=True)
-    return False
+    return _send(subject, _build_html(plans, url), _build_text(plans, url))
 
 
 def _build_html(plans: list[FloorPlan], url: str) -> str:
