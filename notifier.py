@@ -57,8 +57,9 @@ def send_confirmation_email(watch_plans: str, url: str) -> bool:
     msg.attach(MIMEText(text, 'plain'))
     msg.attach(MIMEText(html, 'html'))
 
+    log.info("Connecting to SMTP %s:%s...", smtp_host, smtp_port)
     try:
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
             server.ehlo()
             server.starttls()
             server.login(smtp_user, smtp_password)
@@ -98,8 +99,9 @@ def send_email_notification(plans: list[FloorPlan], url: str) -> bool:
     msg.attach(MIMEText(_build_text(plans, url), 'plain'))
     msg.attach(MIMEText(_build_html(plans, url), 'html'))
 
+    log.info("Connecting to SMTP %s:%s...", smtp_host, smtp_port)
     try:
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
             server.ehlo()
             server.starttls()
             server.login(smtp_user, smtp_password)

@@ -107,7 +107,10 @@ def check_availability(first_run: bool = False) -> None:
     previous = load_state()
 
     if first_run and not previous:
-        send_confirmation_email(_WATCH_PLANS_RAW or 'All plans', URL)
+        try:
+            send_confirmation_email(_WATCH_PLANS_RAW or 'All plans', URL)
+        except Exception as e:
+            log.error("Confirmation email error: %s", e, exc_info=True)
 
     newly_available = find_new_availabilities(previous, watched)
 
