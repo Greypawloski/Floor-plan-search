@@ -1,9 +1,9 @@
-import json
 import logging
 import os
-import urllib.error
-import urllib.request
+import smtplib
 from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 from scraper import FloorPlan
 
@@ -11,41 +11,33 @@ log = logging.getLogger(__name__)
 
 
 def _send(subject: str, html: str, text: str) -> bool:
-    """Send an email via Resend API (HTTPS — works on Railway)."""
-    api_key = os.getenv('RESEND_API_KEY', '')
-    notify_email = os.getenv('NOTIFY_EMAIL', '')
+    smtp_host = os.getenv('SMTP_HOST', '')
+    smtp_port = int(os.getenv('SMTP_PORT', '587'))
+    smtp_user = os.getenv('SMTP_USER', '')
+    smtp_pass = os.getenv('SMTP_PASS', '')
+    notify_email = os.getenv('NOTIFY_EMAIL', smtp_user)
 
-    if not all([api_key, notify_email]):
-        log.error("RESEND_API_KEY and NOTIFY_EMAIL must be set in Railway Variables.")
+    if not all([smtp_host, smtp_user, smtp_pass, notify_email]):
+        log.error("SMTP_HOST, SMTP_USER, SMTP_PASS, and NOTIFY_EMAIL must be set.")
         return False
 
-    payload = json.dumps({
-        'from': 'Floor Plan Monitor <onboarding@resend.dev>',
-        'to': [notify_email],
-        'subject': subject,
-        'html': html,
-        'text': text,
-    }).encode()
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From'] = smtp_user
+    msg['To'] = notify_email
+    msg.attach(MIMEText(text, 'plain'))
+    msg.attach(MIMEText(html, 'html'))
 
-    req = urllib.request.Request(
-        'https://api.resend.com/emails',
-        data=payload,
-        headers={
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json',
-        },
-        method='POST',
-    )
-
-    log.info("Sending email to %s via Resend...", notify_email)
+    log.info("Sending email to %s via SMTP %s:%d...", notify_email, smtp_host, smtp_port)
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read())
-            log.info("Email sent — Resend id=%s", result.get('id'))
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(smtp_user, [notify_email], msg.as_string())
+            log.info("Email sent successfully.")
             return True
-    except urllib.error.HTTPError as e:
-        body = e.read().decode()
-        log.error("Resend API error %s: %s", e.code, body)
     except Exception as e:
         log.error("Failed to send email: %s", e, exc_info=True)
     return False
