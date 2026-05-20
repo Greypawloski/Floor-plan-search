@@ -10,10 +10,12 @@ Usage:
 """
 
 import argparse
+import http.server
 import logging
 import os
 import re
 import sys
+import threading
 import time
 
 import schedule
@@ -123,7 +125,21 @@ def check_availability() -> None:
     save_state(watched)
 
 
+def _start_health_server() -> None:
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'OK')
+        def log_message(self, *args):
+            pass
+    server = http.server.HTTPServer(('0.0.0.0', 8080), _Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    log.info("Health check server listening on :8080")
+
+
 def main() -> None:
+    _start_health_server()
     parser = argparse.ArgumentParser(description='Floor plan availability monitor')
     parser.add_argument('--once', action='store_true', help='Check once and exit')
     parser.add_argument('--reset', action='store_true', help='Clear saved state before running')
