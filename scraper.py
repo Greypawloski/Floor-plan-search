@@ -121,7 +121,10 @@ def scrape_floor_plans(url: str) -> Optional[list[FloorPlan]]:
             log.warning("Could not parse individual floor plans; falling back to full-page change detection")
             plans = _extract_full_page_fallback(page)
 
-        browser.close()
+        try:
+            browser.close()
+        except Exception:
+            pass
         log.info("Scraped %d floor plan entries", len(plans))
         return plans
 
