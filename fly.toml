@@ -1,0 +1,10 @@
+app = "floor-plan-monitor"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
